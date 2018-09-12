@@ -1,59 +1,25 @@
-var casper = require('casper').create();
-var fs = require('fs'); // this is Phantomjs's fs module, not Nodejs's ! Dffferent API!!!
-var addDevice = require('./src/addDevice.js');
+var exec = require('child_process').exec;
+var fs = require('fs');
 
-var config = JSON.parse(fs.read('config.json'));
-var content = fs.read('devices.tsv');
+var config = JSON.parse(fs.readFileSync('config.json', 'utf8'));
+var content = fs.readFileSync('devices.tsv', 'utf8');
+var rows = content.split("\n").length;
 
-casper.on('step.error', function(err) {
-    casper.page.evaluate(function() {
-        document.body.bgColor = 'white';
-    });
-    casper.captureSelector("screenshots/error.png", "html");
-    this.die("Step failed: " + err + " See error.png for more info");
-});
-//casper
-//    .on("error", function(msg){ console.log("error: " + msg, "ERROR") })
-//    .on("page.error", function(msg, trace){ console.log("Page Error: " + msg, "ERROR") })
-casper.on("remote.message", function(msg){ console.log("Info: " + msg, "INFO") });
-
-casper.options.waitTimeout = content.split("\n").length * 20000; // 20s per operation
-casper.options.verbose = true;
-casper.options.logLevel ="debug";
-casper.options.viewportSize = {width: 1280, height: 600};
-
-casper.start('http://' + config.dude_ip + '/webfig/', function () {
-    // Wait for the page to be loaded (login button)
-    casper.waitForSelector('a#dologin');
-});
-
-casper.wait(2000, function() {
-    casper.captureSelector("screenshots/login.png", "html");
-});
-
-casper.then(function () {
-    casper.sendKeys('#name', config.dude_username);
-});
-
-casper.then(function () {
-    casper.sendKeys('#password', config.dude_password);
-});
-
-casper.then(function () {
-    casper.click('#dologin');
-});
-
-casper.wait(3000, function() {
-    casper.captureSelector("screenshots/menu.png", "html");
-});
-
-content.split("\n").forEach(function(row) {
-    var columns = row.split("\t");
-    if (columns[0]) {
-        addDevice(casper, config.dude_ip, columns[0], columns[1], columns[2]);
+function spawnBatch(startAtIndex) {
+    if (startAtIndex < rows) {
+        console.log('===== PROCESSING BATCH (SIZE ' + config.batch_size + ') AT ROW ' + (startAtIndex+1) + ' =====');
+        var child = exec('./node_modules/.bin/casperjs casper-script.js ' + startAtIndex + ' ' + config.batch_size, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`exec error: ${error}`);
+                return;
+            }
+            console.log(`stdout: ${stdout}`);
+            console.log(`stderr: ${stderr}`);
+            console.log('===== DONE =====');
+        });
+        child.on('close', () => {
+            spawnBatch(startAtIndex + config.batch_size);
+        });
     }
-});
-
-casper.run(function () {
-    casper.exit();
-});
+}
+spawnBatch(0);
